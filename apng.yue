@@ -1,47 +1,41 @@
 import 'lib.struct'
-if type(bit) != 'table' then _G.bit = require('lib.bitop') -- htmlの時のみ互換ライブラリを読み込む(crc32でbitを使う)
+string.unpack or= (pat)=> struct.unpack(pat, @) -- stringに入れるとレシーバー・メソッド形式で使える
+if not bit then _G.bit = require('lib.bitop') -- htmlの時のみ互換ライブラリを読み込む(crc32でbitを使う)
 import 'lib.crc32' as hash: crc32
 
 
-read = (data)->
-	read_ = (n, pack = nil)->
-		res, data = data\sub(1,n), data\sub(n+1,-1)
-		if pack then struct.unpack('>'..pack, res) else res -- big endian
+SIGNATURE = '\137PNG\13\10\26\10'
+
+readAPNG = (filecontent)->
+	read = (n)->
+		result, filecontent = filecontent\sub(1,n), filecontent\sub(n+1)
+		result
 	read_chunk = ->
-		size, id = read_(8, 'Ic4')
+		raw = read(8)
+		size, id = raw\unpack('>Ic4')
 		-- pp id, size
 		switch id
 			when 'IHDR'
-				w, h, depth, colortype, compresstype, filter, interlace, crc = read_(size+4, 'IIBBBBBI')
-				-- pp w, h, depth, colortype, compresstype, filter, interlace, crc
-				{id: id, size: size, width: w, height: h, depth: depth, colortype: colortype, compresstype: compresstype, filter: filter, interlace: interlace, crc: crc}
+				w, h, depth, colortype, compresstype, filter, interlace = read(size+4)\unpack('>IIBBBBB') -- +4 はcrcも読むため。unpackしない終わりの部分(crcの所)は省略できる
+				{id: id, width: w, height: h, depth: depth, colortype: colortype, compresstype: compresstype, filter: filter, interlace: interlace}
 			when 'acTL'
-				frames, plays = read_(8, 'II')
-				-- pp frames, plays
-				{id: id, size: size, frames: frames, plays: plays, crc: read_(4, 'I')}
+				frames, plays = read(size+4)\unpack('>II')
+				{id: id, frames: frames, plays: plays}
 			when 'fcTL'
-				n, w, h, l, t, delay1, delay2, dispose, blend = read_(26, 'IIIIIHHBB')
-				-- pp n, w, h, l, t, delay1/delay2, dispose, blend
-				{id: id, size: size, num: n, width: w, height: h, left: l, top: t, delay1: delay1, delay2: (delay2 == 0 and 100 or delay2), dispose: dispose, blend: blend, crc: read_(4, 'I')}
-			when 'fdAT'
-				n = read_(4, 'I')
-				{id: id, size: size, num: n, data: read_(size-4), crc: read_(4, 'I')}
-			-- when 'IDAT', 'PLTE', 'tRNS' then {id: id, size: size, data: read_(size), crc: read_(4, 'I')} -- else節で
-			-- when 'IEND' then {id: id, size: size, crc: read_(4, 'I')}
-			else {id: id, size: size, data: read_(size), crc: read_(4, 'I')}
-	sig = read_(8)
-	_, _, width, height = struct.unpack('>Ic4II', data) -- 画像のw hだけ特別にdataを消費せずに読む
-	-- pp width, height
-	assert sig == '\137PNG\13\10\26\10'
-	chunks = {}
-	while #data >= 12
-		chunks[] = read_chunk()
-	{signature: sig, width: width, height: height, chunks: chunks}
+				_, w, h, l, t, delay1, delay2, dispose, blend = read(size+4)\unpack('>IIIIIHHBB')
+				-- pp _, w, h, l, t, delay1, delay2, dispose, blend
+				{id: id, width: w, height: h, left: l, top: t, delay: delay1 / (delay2 > 0 and  delay2 or 100), dispose: dispose, blend: blend} -- delay2が0の時100とする
+			when 'fdAT' then {id: id, _: read(4), data: read(size-4), __: read(4)}
+			else -- IDAT PLTE tRNS IEND
+				data, crc = read(size), read(4)
+				{id: id, data: data, raw: raw..data..crc} -- rawは再構築時にそのまま使うため
+	assert read(8) == SIGNATURE
+	return while #filecontent >= 12 do read_chunk() -- for/whileでcollectするには受け手/returnの明示が必要
 	
 tochunk = (id, data)-> struct.pack('>Ic4', #data, id) .. data .. struct.pack('>I', crc32(id .. data))
 
 read1frame = (frame)->
-	data = '\137PNG\13\10\26\10' ..
+	data = SIGNATURE ..
 		tochunk('IHDR', struct.pack('>IIBBBBB', frame.width, frame.height, frame.ihdr.depth, frame.ihdr.colortype, frame.ihdr.compresstype, frame.ihdr.filter, frame.ihdr.interlace)) ..
 		(frame.pltechunk or '') .. (frame.trnschunk or '') ..
 		tochunk('IDAT', frame.data) ..
@@ -51,29 +45,28 @@ read1frame = (frame)->
 
 export class APNG
 	new: (filecontent)=>
-		tree = read filecontent
-		@plays, @frames, ihdr, pltechunk, trnschunk, fctl, iendchunk = math.huge, {}, nil, nil, nil, nil, tochunk('IEND', '')
-		for chunk in *tree.chunks
+		chunks = readAPNG(filecontent)
+		@plays, @frames, ihdr, pltechunk, trnschunk, fctl, iendchunk = 1, {}, nil, nil, nil, nil, chunks[#chunks].raw -- iendは最後にあるのでループからは取れない
+		for chunk in *chunks
 			switch chunk.id
 				when 'IHDR' then ihdr = chunk
-				when 'PLTE' then pltechunk = tochunk('PLTE', chunk.data) -- 共通のものは一度だけ作ることにした(読み込む時にそのまま使えるようにできれば０度に出来るはずだけど)
-				when 'tRNS' then trnschunk = tochunk('tRNS', chunk.data)
+				when 'PLTE' then pltechunk = chunk.raw
+				when 'tRNS' then trnschunk = chunk.raw
 				when 'acTL' then @plays = chunk.plays > 0 and chunk.plays or math.huge
 				when 'fcTL' then fctl = chunk
-				when 'IDAT', 'fdAT' then if fctl then @frames[] = {ihdr: ihdr, pltechunk: pltechunk, trnschunk: trnschunk, iendchunk: iendchunk, width: fctl.width, height: fctl.height, left: fctl.left, top: fctl.top, delay: fctl.delay1/fctl.delay2, dispose: fctl.dispose, blend: fctl.blend, data: chunk.data}
-		@canvas = gr.newCanvas(tree.width, tree.height)
+				when 'IDAT', 'fdAT' then if fctl then @frames[] = {...fctl, data: chunk.data, ihdr: ihdr, pltechunk: pltechunk, trnschunk: trnschunk, iendchunk: iendchunk}
+		@canvas = gr.newCanvas(ihdr.width, ihdr.height)
 		@clearcolor = {0,0,0,0}--{...uipalette.base, [4]: 0}
 		@clock, @index = 0, 1
 		@update1frame(@frames[1])
-		-- @plays = 3
 	
 	update1frame: (frame)=>
-		frame.img or= read1frame(frame) -- 破壊的操作
+		frame.image or= read1frame(frame) -- 破壊的操作(テーブルに追加している)
 		gr.setCanvas(@canvas)
-		if @_dispose then @_dispose()
-		@_dispose = switch frame.dispose -- 次回呼び出された時に使う
+		@._dispose?() -- 下の行で設定したdispose関数(があれば)呼び出し
+		@_dispose = switch frame.dispose -- 次回呼び出された時に使う(実質static変数)
 			when 0 then nil
-			when 1 then ->
+			when 1 then -> -- 現在のフレーム情報を使うクロージャを返し、次のフレームを描く時に実行させる
 				gr.setScissor(frame.left, frame.top, frame.width, frame.height)
 				gr.clear(@clearcolor)
 				gr.setScissor()
@@ -83,20 +76,19 @@ export class APNG
 				gr.setScissor(frame.left, frame.top, frame.width, frame.height)
 				gr.clear(@clearcolor)
 				gr.setScissor()
-			-- when 1
-		gr.draw(gr.setColor(1,1,1) or frame.img, frame.left, frame.top)
+			-- when 1 then noop()
+		gr.draw(gr.setColor(1,1,1) or frame.image, frame.left, frame.top)
 		gr.setCanvas()
 	
 	update: (dt)=>
 		@clock += dt
 		while @clock > @frames[@index].delay
 			@clock -= @frames[@index].delay
-			@index = if @index < #@frames then @index+1
+			@index = if @index < #@frames then @index + 1
 			else
 				@plays -= 1
-				if @plays == 0
+				if @plays <= 0
 					@update = =>
 					return
 				1
 			@update1frame(@frames[@index])
-

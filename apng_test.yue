@@ -10,9 +10,6 @@ import 'lib.maid64' -- 改造して高解像度を初期値にした
 import 'ui' as :Scene--, :SelectBox
 -- import 'bigmap' as :Map
 -- import 'lib.tween'  -- 改造してdelayを可能にした
--- import 'lib.struct'
--- if type(bit) != 'table' then _G.bit = require('lib.bitop') -- htmlの時のみ読み込む(crc32でbitを使う)
--- import 'lib.crc32' as hash: crc32
 import 'apng' as :APNG
 -- local * -- まとめて前方宣言(*か^)
 
@@ -26,107 +23,11 @@ love.audio.setVolume(.5)
 -- BGM'assets/sounds/052622ineedtogetouttahere_32k.mp3'
 
 
--- read = (data)->
--- 	read_ = (n, pack = nil)->
--- 		res, data = data\sub(1,n), data\sub(n+1,-1)
--- 		if pack then struct.unpack('>'..pack, res) else res
--- 	read_chunk = ->
--- 		size, id = read_(8, 'Ic4')
--- 		pp id, size
--- 		switch id
--- 			when 'IHDR'
--- 				w, h, depth, colortype, compresstype, filter, interlace, crc = read_(size+4, 'IIBBBBBI')
--- 				-- pp w, h, depth, colortype, compresstype, filter, interlace, crc
--- 				{id: id, size: size, width: w, height: h, depth: depth, colortype: colortype, compresstype: compresstype, filter: filter, interlace: interlace, crc: crc}
--- 			when 'acTL'
--- 				frames, plays = read_(8, 'II')
--- 				-- pp frames, plays
--- 				{id: id, size: size, frames: frames, plays: plays, crc: read_(4, 'I')}
--- 			when 'fcTL'
--- 				n, w, h, l, t, delay1, delay2, dispose, blend = read_(26, 'IIIIIHHBB')
--- 				pp n, w, h, l, t, delay1/delay2, dispose, blend
--- 				{id: id, size: size, num: n, width: w, height: h, left: l, top: t, delay1: delay1, delay2: (delay2 == 0 and 100 or delay2), dispose: dispose, blend: blend, crc: read_(4, 'I')}
--- 			when 'fdAT'
--- 				n = read_(4, 'I')
--- 				{id: id, size: size, num: n, data: read_(size-4), crc: read_(4, 'I')}
--- 			-- when 'IDAT', 'PLTE', 'tRNS' then {id: id, size: size, data: read_(size), crc: read_(4, 'I')}
--- 			-- when 'IEND' then {id: id, size: size, crc: read_(4, 'I')}
--- 			else {id: id, size: size, data: read_(size), crc: read_(4, 'I')}
--- 	sig = read_(8)
--- 	_, _, width, height = struct.unpack('>Ic4II', data) -- 画像のw hだけ特別にdataを消費せずに読む
--- 	-- pp width, height
--- 	assert sig == '\137PNG\13\10\26\10'
--- 	chunks = {}
--- 	while #data >= 12
--- 		chunks[] = read_chunk()
--- 	{signature: sig, width: width, height: height, chunks: chunks}
--- 	
--- tochunk = (id, data)-> struct.pack('>Ic4', #data, id) .. data .. struct.pack('>I', crc32(id .. data))
---
--- read1frame = (frame)->
--- 	data = '\137PNG\13\10\26\10' ..
--- 		tochunk('IHDR', struct.pack('>IIBBBBB', frame.width, frame.height, frame.ihdr.depth, frame.ihdr.colortype, frame.ihdr.compresstype, frame.ihdr.filter, frame.ihdr.interlace)) ..
--- 		(frame.pltechunk or '') .. (frame.trnschunk or '') ..
--- 		tochunk('IDAT', frame.data) ..
--- 		frame.iendchunk
--- 	gr.newImage(love.filesystem.newFileData(data, '1.png'))
---
---
--- class APNG
--- 	new: (filecontent)=>
--- 		tree = read filecontent
--- 		@plays, @frames, ihdr, pltechunk, trnschunk, fctl, iendchunk = lume.maxinteger, {}, nil, nil, nil, nil, tochunk('IEND', '')
--- 		for chunk in *tree.chunks
--- 			switch chunk.id
--- 				when 'IHDR' then ihdr = chunk
--- 				when 'PLTE' then pltechunk = tochunk('PLTE', chunk.data) -- 共通のものは一度だけ作ることにした(読み込む時にそのまま使えるようにできれば０度に出来るはずだけど)
--- 				when 'tRNS' then trnschunk = tochunk('tRNS', chunk.data)
--- 				when 'acTL' then @plays = chunk.plays > 0 and chunk.plays or lume.maxinteger
--- 				when 'fcTL' then fctl = chunk
--- 				when 'IDAT', 'fdAT' then if fctl then @frames[] = {ihdr: ihdr, pltechunk: pltechunk, trnschunk: trnschunk, iendchunk: iendchunk, width: fctl.width, height: fctl.height, left: fctl.left, top: fctl.top, delay: fctl.delay1/fctl.delay2, dispose: fctl.dispose, blend: fctl.blend, data: chunk.data}
--- 		@canvas = gr.newCanvas(tree.width, tree.height)
--- 		@bgcolor = {...uipalette.base, [4]: 0}
--- 		@clock, @index = 0, 1
--- 		@update1frame(@frames[1])
--- 		-- @plays = 3
--- 	
--- 	update1frame: (frame)=>
--- 		frame.img or= read1frame(frame) -- 破壊的操作
--- 		gr.setCanvas(@canvas)
--- 		if @_dispose then @_dispose()
--- 		@_dispose = switch frame.dispose -- 次回呼び出された時に使う
--- 			when 0 then nil
--- 			when 1 then ->
--- 				gr.setScissor(frame.left, frame.top, frame.width, frame.height)
--- 				gr.clear(@bgcolor)
--- 				gr.setScissor()
--- 			when 2 then nil -- not impl
--- 		switch frame.blend
--- 			when 0
--- 				gr.setScissor(frame.left, frame.top, frame.width, frame.height)
--- 				gr.clear(@bgcolor)
--- 				gr.setScissor()
--- 			-- when 1
--- 		gr.draw(gr.setColor(1,1,1) or frame.img, frame.left, frame.top)
--- 		gr.setCanvas()
--- 	
--- 	update: (dt)=>
--- 		@clock += dt
--- 		while @clock > @frames[@index].delay
--- 			if @index == #@frames
--- 				@plays -= 1
--- 				if @plays == 0
--- 					@update = =>
--- 					return
--- 			@clock -= @frames[@index].delay
--- 			@index = lume.wrap(@index+1, 1, #@frames)
--- 			@update1frame(@frames[@index])
-		
-
 class GameScene extends Scene
 	new: =>
 		@apng = with APNG(love.filesystem.read('elephant.apng'))
 			.clearcolor = {...uipalette.base, [4]: 0}
+			-- .plays = 2
 
 	filedropped: (file)=>
 		@apng = with APNG(file\read())
@@ -176,6 +77,8 @@ require('distribute').modify_index_html(require('lib.os_capture').capture('echo 
 ## LOVE2DでAPNGを扱うテストです。
 
 メモリ上で１フレームごとに分割し、PNGファイルデータとして読み込みます
+
+struct.lua、crc32.lua、bitop.lua(Web版の時)が必要です
 
 - [apng_test.love](apng_test.love)
 - [apng_test_win64.zip](apng_test_win64.zip)
