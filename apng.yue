@@ -1,6 +1,5 @@
 import 'lib.struct'
-string.unpack or= (pat)=> struct.unpack(pat, @) -- stringに入れるとレシーバー・メソッド形式で使える
-if not bit then _G.bit = require('lib.bitop') -- htmlの時のみ互換ライブラリを読み込む(crc32でbitを使う)
+if not bit then _G.bit = require('lib.bitop') -- Web版の時のみ互換ライブラリを読み込む(crc32でbitを使う)
 import 'lib.crc32' as hash: crc32
 
 
@@ -12,17 +11,17 @@ readAPNG = (filecontent)->
 		result
 	read_chunk = ->
 		raw = read(8)
-		size, id = raw\unpack('>Ic4')
+		size, id = struct.unpack('>Ic4', raw)
 		-- pp id, size
 		switch id
 			when 'IHDR'
-				w, h, depth, colortype, compresstype, filter, interlace = read(size+4)\unpack('>IIBBBBB') -- +4 はcrcも読むため。unpackしない終わりの部分(crcの所)は省略できる
+				w, h, depth, colortype, compresstype, filter, interlace = struct.unpack('>IIBBBBB', read(size+4)) -- +4 はcrcの部分も読むため。unpackしない終わりの部分(crcの所)は省略できる
 				{id: id, width: w, height: h, depth: depth, colortype: colortype, compresstype: compresstype, filter: filter, interlace: interlace}
 			when 'acTL'
-				frames, plays = read(size+4)\unpack('>II')
+				frames, plays = struct.unpack('>II', read(size+4))
 				{id: id, frames: frames, plays: plays}
 			when 'fcTL'
-				_, w, h, l, t, delay1, delay2, dispose, blend = read(size+4)\unpack('>IIIIIHHBB')
+				_, w, h, l, t, delay1, delay2, dispose, blend = struct.unpack('>IIIIIHHBB', read(size+4))
 				-- pp _, w, h, l, t, delay1, delay2, dispose, blend
 				{id: id, width: w, height: h, left: l, top: t, delay: delay1 / (delay2 > 0 and  delay2 or 100), dispose: dispose, blend: blend} -- delay2が0の時100とする
 			when 'fdAT' then {id: id, _: read(4), data: read(size-4), __: read(4)}
@@ -38,7 +37,8 @@ read1frame = (frame)->
 	data = SIGNATURE ..
 		tochunk('IHDR', struct.pack('>IIBBBBB', frame.width, frame.height, frame.ihdr.depth, frame.ihdr.colortype, frame.ihdr.compresstype, frame.ihdr.filter, frame.ihdr.interlace)) ..
 		(frame.pltechunk or '') .. (frame.trnschunk or '') ..
-		tochunk('IDAT', frame.data) ..
+		-- tochunk('IDAT', frame.data) ..
+		table.concat([tochunk('IDAT', data) for data in *frame.idats]) .. -- 複数の分割IDATに対応
 		frame.iendchunk
 	gr.newImage(love.filesystem.newFileData(data, '1.png'))
 
@@ -47,14 +47,18 @@ export class APNG
 	new: (filecontent)=>
 		chunks = readAPNG(filecontent)
 		@plays, @frames, ihdr, pltechunk, trnschunk, fctl, iendchunk = 1, {}, nil, nil, nil, nil, chunks[#chunks].raw -- iendは最後にあるのでループからは取れない
-		for chunk in *chunks
+		for i=1,#chunks
+			chunk = chunks[i]
 			switch chunk.id
 				when 'IHDR' then ihdr = chunk
 				when 'PLTE' then pltechunk = chunk.raw
 				when 'tRNS' then trnschunk = chunk.raw
 				when 'acTL' then @plays = chunk.plays > 0 and chunk.plays or math.huge
-				when 'fcTL' then fctl = chunk
-				when 'IDAT', 'fdAT' then if fctl then @frames[] = {...fctl, data: chunk.data, ihdr: ihdr, pltechunk: pltechunk, trnschunk: trnschunk, iendchunk: iendchunk}
+				when 'fcTL' then fctl = chunk -- 新しいフレームとするフラグ
+				when 'IDAT', 'fdAT'
+					if fctl then @frames[] = {...fctl, idats: {chunk.data}, ihdr: ihdr, pltechunk: pltechunk, trnschunk: trnschunk, iendchunk: iendchunk}
+					elseif #@frames > 0 then @frames[#@frames].idats[] = chunk.data -- IDAT/fdATが連続する場合は最後のフレームに統合する(最初のfctlの前にIDATがあった場合ループに含まないも実現)
+					fctl = nil -- 新しいフレームかのフラグに使う
 		@canvas = gr.newCanvas(ihdr.width, ihdr.height)
 		@clearcolor = {0,0,0,0}--{...uipalette.base, [4]: 0}
 		@clock, @index = 0, 1

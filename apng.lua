@@ -1,9 +1,5 @@
 local _module_0 = { }
 local struct = require('lib.struct')
-local _obj_0 = string
-_obj_0.unpack = _obj_0.unpack or function(self, pat)
-	return struct.unpack(pat, self)
-end
 if not bit then
 	_G.bit = require('lib.bitop')
 end
@@ -20,9 +16,9 @@ readAPNG = function(filecontent)
 	local read_chunk
 	read_chunk = function()
 		local raw = read(8)
-		local size, id = raw:unpack('>Ic4')
+		local size, id = struct.unpack('>Ic4', raw)
 		if 'IHDR' == id then
-			local w, h, depth, colortype, compresstype, filter, interlace = read(size + 4):unpack('>IIBBBBB')
+			local w, h, depth, colortype, compresstype, filter, interlace = struct.unpack('>IIBBBBB', read(size + 4))
 			return {
 				id = id,
 				width = w,
@@ -34,14 +30,14 @@ readAPNG = function(filecontent)
 				interlace = interlace
 			}
 		elseif 'acTL' == id then
-			local frames, plays = read(size + 4):unpack('>II')
+			local frames, plays = struct.unpack('>II', read(size + 4))
 			return {
 				id = id,
 				frames = frames,
 				plays = plays
 			}
 		elseif 'fcTL' == id then
-			local _, w, h, l, t, delay1, delay2, dispose, blend = read(size + 4):unpack('>IIIIIHHBB')
+			local _, w, h, l, t, delay1, delay2, dispose, blend = struct.unpack('>IIIIIHHBB', read(size + 4))
 			return {
 				id = id,
 				width = w,
@@ -81,9 +77,20 @@ local tochunk
 tochunk = function(id, data)
 	return struct.pack('>Ic4', #data, id) .. data .. struct.pack('>I', crc32(id .. data))
 end
+local _anon_func_0 = function(frame, tochunk)
+	local _accum_0 = { }
+	local _len_0 = 1
+	local _list_0 = frame.idats
+	for _index_0 = 1, #_list_0 do
+		local data = _list_0[_index_0]
+		_accum_0[_len_0] = tochunk('IDAT', data)
+		_len_0 = _len_0 + 1
+	end
+	return _accum_0
+end
 local read1frame
 read1frame = function(frame)
-	local data = SIGNATURE .. tochunk('IHDR', struct.pack('>IIBBBBB', frame.width, frame.height, frame.ihdr.depth, frame.ihdr.colortype, frame.ihdr.compresstype, frame.ihdr.filter, frame.ihdr.interlace)) .. (frame.pltechunk or '') .. (frame.trnschunk or '') .. tochunk('IDAT', frame.data) .. frame.iendchunk
+	local data = SIGNATURE .. tochunk('IHDR', struct.pack('>IIBBBBB', frame.width, frame.height, frame.ihdr.depth, frame.ihdr.colortype, frame.ihdr.compresstype, frame.ihdr.filter, frame.ihdr.interlace)) .. (frame.pltechunk or '') .. (frame.trnschunk or '') .. table.concat(_anon_func_0(frame, tochunk)) .. frame.iendchunk
 	return gr.newImage(love.filesystem.newFileData(data, '1.png'))
 end
 local APNG
@@ -93,9 +100,9 @@ local _base_0 = {
 		frame.image = frame.image or read1frame(frame)
 		gr.setCanvas(self.canvas)
 		do
-			local _obj_1 = self._dispose
-			if _obj_1 ~= nil then
-				_obj_1()
+			local _obj_0 = self._dispose
+			if _obj_0 ~= nil then
+				_obj_0()
 			end
 		end
 		do
@@ -149,8 +156,8 @@ _class_0 = setmetatable({
 		local chunks = readAPNG(filecontent)
 		local ihdr, pltechunk, trnschunk, fctl, iendchunk
 		self.plays, self.frames, ihdr, pltechunk, trnschunk, fctl, iendchunk = 1, { }, nil, nil, nil, nil, chunks[#chunks].raw
-		for _index_0 = 1, #chunks do
-			local chunk = chunks[_index_0]
+		for i = 1, #chunks do
+			local chunk = chunks[i]
 			local _exp_0 = chunk.id
 			if 'IHDR' == _exp_0 then
 				ihdr = chunk
@@ -164,7 +171,7 @@ _class_0 = setmetatable({
 				fctl = chunk
 			elseif 'IDAT' == _exp_0 or 'fdAT' == _exp_0 then
 				if fctl then
-					local _obj_1 = self.frames
+					local _obj_0 = self.frames
 					local _tab_0 = { }
 					local _idx_0 = 1
 					for _key_0, _value_0 in pairs(fctl) do
@@ -175,13 +182,19 @@ _class_0 = setmetatable({
 							_tab_0[_key_0] = _value_0
 						end
 					end
-					_tab_0.data = chunk.data
+					_tab_0.idats = {
+						chunk.data
+					}
 					_tab_0.ihdr = ihdr
 					_tab_0.pltechunk = pltechunk
 					_tab_0.trnschunk = trnschunk
 					_tab_0.iendchunk = iendchunk
-					_obj_1[#_obj_1 + 1] = _tab_0
+					_obj_0[#_obj_0 + 1] = _tab_0
+				elseif #self.frames > 0 then
+					local _obj_0 = self.frames[#self.frames].idats
+					_obj_0[#_obj_0 + 1] = chunk.data
 				end
+				fctl = nil
 			end
 		end
 		self.canvas = gr.newCanvas(ihdr.width, ihdr.height)

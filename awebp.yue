@@ -1,0 +1,90 @@
+import 'lib.struct'
+
+readChunks = (filecontent)->
+	read = (n)->
+		result, filecontent = filecontent\sub(1,n), filecontent\sub(n+1)
+		result
+	read_chunk = ->
+		raw = read(8)
+		id, size = struct.unpack('<c4I', raw)
+		pp id, size
+		close _ = {<close>: -> if size%2==1 then read(1)}
+		switch id
+			when 'VP8X'
+				flags, w1, w2, h1, h2 = struct.unpack('<IHBHB', read(10))
+				-- pp flags, w1+w2*65536+1, h1+h2*65536+1
+				{id: id, flags: flags, width: 1+w1+w2*65536, height: 1+h1+h2*65536}
+			when 'ANIM'
+				r,g,b,a, loops = struct.unpack('<BBBBH', read(6))
+				-- pp r, g, b, a, loops
+				{id: id, bgcolor: {r/255, g/255, b/255, a/255}, loops: loops}
+			when 'ANMF'
+				l1,l2, t1,t2, w1,w2, h1,h2, d1,d2, flags = struct.unpack('<HBHBHBHBHBB', read(16))
+				-- pp {id: id, left: (l1+l2*65536)*2, top: (t1+t2*65536)*2, width: w1+w2*65536+1, height: h1+h2*65536+1, duration: (d1+d2*65536)/1000, flags: falgs, blend: flags/2%2, dispose: flags%2}
+				{id: id, left: (l1+l2*65536)*2, top: (t1+t2*65536)*2, width: 1+w1+w2*65536, height: 1+h1+h2*65536, duration: (d1+d2*65536)/1000, blend: math.floor(flags/2)%2, dispose: flags%2, chunks: readChunks(read(size-16))}
+			else -- VP8  VP8L 
+				{id: id, data: read(size)}
+	return while #filecontent >= 8 do read_chunk() -- for/whileでcollectするには受け手/returnの明示が必要
+	
+readAWebp = (filecontent)->
+	-- sig1, size, sig2 = struct.unpack('c4Ic4', read(12))
+	readChunks(filecontent\sub(13, -1))
+
+-- tochunk = (id, data)-> struct.pack('>Ic4', #data, id) .. data .. struct.pack('>I', crc32(id .. data))
+
+read1frame = (frame)->
+	chunk = frame.chunks[1]
+	assert chunk.id == 'VP8L'
+	data = 'RIFF' .. struct.pack('<I', 4 + 18 + 8 + #chunk.data) .. 'WEBP' .. -- offset 8からのサイズ
+		'VP8X' .. struct.pack('<IIHBHB', 10, frame.vp8x.flags-2, (frame.width-1)%65536, math.floor((frame.width-1)/65536), (frame.height-1)%65536, math.floor((frame.height-1)/65536)) .. -- animation flag を除去
+		chunk.id ..  struct.pack('<I', #chunk.data)  .. chunk.data
+	love.filesystem.write('1.webp', data)
+	gr.newImage(love.filesystem.newFileData(data, '1.webp'))
+
+
+export class AWebp
+	new: (filecontent)=>
+		chunks = readAWebp(filecontent)
+		@loops, @bgcolor, @frames, vp8x = 1, {0,0,0,1}, {}, nil
+		for chunk in *chunks
+			switch chunk.id
+				when 'VP8X' then vp8x = chunk
+				when 'ANIM' then @bgcolor, @loops = chunk.bgcolor, chunk.loops > 0 and chunk.loops or math.huge
+				when 'ANMF' then @frames[] = {...chunk, vp8x: vp8x}
+		@canvas = gr.newCanvas(vp8x.width, vp8x.height)
+		@clock, @index = 0, 1
+		@update1frame(@frames[1])
+	
+	update1frame: (frame)=>
+		frame.image or= read1frame(frame) -- 破壊的操作(テーブルに追加している)
+		gr.setCanvas(@canvas)
+		@._dispose?() -- 下の行で設定したdispose関数(があれば)呼び出し
+		@_dispose = switch frame.dispose -- 次回呼び出された時に使う(実質static変数)
+			when 0 then nil
+			when 1 then -> -- 現在のフレーム情報を使うクロージャを返し、次のフレームを描く時に実行させる
+				gr.setScissor(frame.left, frame.top, frame.width, frame.height)
+				gr.clear(@bgcolor)
+				gr.setScissor()
+			when 2 then nil -- [ ] todo not impl
+		switch frame.blend
+			-- when 0 then noop()
+			when 1
+				gr.setScissor(frame.left, frame.top, frame.width, frame.height)
+				gr.clear(@bgcolor)
+				gr.setScissor()
+		gr.draw(gr.setColor(1,1,1) or frame.image, frame.left, frame.top)
+		gr.setCanvas()
+	
+	update: (dt)=>
+		@clock += dt
+		while @clock > @frames[@index].duration
+			@clock -= @frames[@index].duration
+			@index = if @index < #@frames then @index + 1
+			else
+				@plays -= 1
+				if @plays <= 0
+					@update = =>
+					return
+				1
+			@update1frame(@frames[@index])
+

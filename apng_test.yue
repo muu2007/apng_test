@@ -37,7 +37,7 @@ class GameScene extends Scene
 		@apng\update(dt)
 
 	draw: =>
-		gr.draw(@apng.canvas)
+		gr.draw(@apng.canvas, 0, 0)
 
 love.load = ->
 	if 'DEBUG' in arg
@@ -76,7 +76,7 @@ require('distribute').modify_index_html(require('lib.os_capture').capture('echo 
 
 ## LOVE2DでAPNGを扱うテストです。
 
-メモリ上で１フレームごとに分割し、PNGファイルデータとして読み込みます
+メモリ上で１フレームごとに分割し、一枚のPNGファイルデータとして読み込みます
 
 struct.lua、crc32.lua、bitop.lua(Web版の時)が必要です
 
@@ -86,6 +86,16 @@ struct.lua、crc32.lua、bitop.lua(Web版の時)が必要です
 - [apng.lua](apng.lua)
 
 zlib/libpng license
+
+---
+
+agif版、awebp版書いてみたけど、動かない。 these versions dont work
+
+- [agif.yue](agif.yue)
+- [agif.lua](agif.lua)
+- [awebp.yue](awebp.yue)
+- [awebp.lua](awebp.lua)
+
 ]]
 
 
