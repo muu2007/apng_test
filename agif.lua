@@ -72,7 +72,6 @@ readAGif = function(filecontent)
 				end
 				blocks = _accum_0
 			end
-			pp(#blocks, #blocks[1], blocks[1])
 			return {
 				id = 'imageblock',
 				left = left,
@@ -92,7 +91,8 @@ readAGif = function(filecontent)
 			return pp('block read error')
 		end
 	end
-	assert(read(6) == 'GIF89a')
+	local sig = read(6)
+	assert(sig == 'GIF89a' or sig == 'GIF87a')
 	local width, height, flags, bg, aspect = struct.unpack('<HHBBB', read(7))
 	local palette = flags > 127 and read(3 * 2 ^ (flags % 8 + 1)) or ''
 	pp(width, height, flags, #palette / 3)
@@ -106,15 +106,7 @@ readAGif = function(filecontent)
 		end
 		blocks = _accum_0
 	end
-	return {
-		width = width,
-		height = height,
-		flags = flags,
-		bg = bg,
-		aspect = aspect,
-		palette = palette,
-		blocks = blocks
-	}
+	return width, height, flags, bg, aspect, palette, blocks
 end
 local _anon_func_0 = function(frame, string)
 	local _accum_0 = { }
@@ -129,8 +121,8 @@ local _anon_func_0 = function(frame, string)
 end
 local read1frame
 read1frame = function(frame)
-	local data = 'GIF89a' .. struct.pack('<HHBBB', frame.width, frame.height, frame.globalflags, frame.bg, frame.aspect) .. frame.globalpalette .. '!' .. struct.pack('<BBBHBB', 0xf9, 4, frame.graphiccontrol.flags, math.floor(frame.graphiccontrol.delay * 100), frame.graphiccontrol.transparent, 0) .. ',' .. struct.pack('<HHHHB', 0, 0, frame.width, frame.height, frame.flags) .. frame.palette .. string.char(frame.minimumcodesize) .. table.concat(_anon_func_0(frame, string)) .. '\0' .. ';'
-	return gr.newImage(love.filesystem.newFileData(data, '1.gif'))
+	local data = 'GIF89a' .. struct.pack('<HHBBB', frame.width, frame.height, frame.globalflags, frame.bg, frame.aspect) .. frame.globalpalette .. '!' .. struct.pack('<BBBHBB', 0xf9, 4, frame.graphiccontrol.flags, 0, frame.graphiccontrol.transparent, 0) .. ',' .. struct.pack('<HHHHB', 0, 0, frame.width, frame.height, frame.flags) .. frame.palette .. string.char(frame.minimumcodesize) .. table.concat(_anon_func_0(frame, string)) .. '\0' .. ';'
+	return gr.newImage(love.data.newByteData(data))
 end
 local AGif
 local _class_0
@@ -146,15 +138,15 @@ local _base_0 = {
 		end
 		do
 			local _exp_0 = frame.dispose
-			if 0 == _exp_0 then
+			if 0 == _exp_0 or 1 == _exp_0 then
 				self._dispose = nil
-			elseif 1 == _exp_0 then
+			elseif 2 == _exp_0 then
 				self._dispose = function()
 					gr.setScissor(frame.left, frame.top, frame.width, frame.height)
 					gr.clear(self.bgcolor)
 					return gr.setScissor()
 				end
-			elseif 2 == _exp_0 then
+			elseif 3 == _exp_0 then
 				self._dispose = nil
 			end
 		end
@@ -171,7 +163,7 @@ local _base_0 = {
 	end,
 	update = function(self, dt)
 		self.clock = self.clock + dt
-		while self.clock > self.frames[self.index].graphiccontrol.delay do
+		if self.clock > self.frames[self.index].graphiccontrol.delay then
 			self.clock = self.clock - self.frames[self.index].graphiccontrol.delay
 			if self.index < #self.frames then
 				self.index = self.index + 1
@@ -183,7 +175,8 @@ local _base_0 = {
 				end
 				self.index = 1
 			end
-			self:update1frame(self.frames[self.index])
+			pp('index', self.index)
+			return self:update1frame(self.frames[self.index])
 		end
 	end
 }
@@ -192,11 +185,7 @@ if _base_0.__index == nil then
 end
 _class_0 = setmetatable({
 	__init = function(self, filecontent)
-		local width, height, flags, bg, aspect, palette, blocks
-		do
-			local _obj_0 = readAGif(filecontent)
-			width, height, flags, bg, aspect, palette, blocks = _obj_0.width, _obj_0.height, _obj_0.flags, _obj_0.bg, _obj_0.aspect, _obj_0.palette, _obj_0.blocks
-		end
+		local width, height, flags, bg, aspect, palette, blocks = readAGif(filecontent)
 		local graphiccontrol
 		self.loops, self.bgcolor, self.frames, graphiccontrol = math.huge, {
 			0,

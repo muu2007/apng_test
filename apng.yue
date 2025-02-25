@@ -31,16 +31,15 @@ readAPNG = (filecontent)->
 	assert read(8) == SIGNATURE
 	return while #filecontent >= 12 do read_chunk() -- for/whileでcollectするには受け手/returnの明示が必要
 	
-tochunk = (id, data)-> struct.pack('>Ic4', #data, id) .. data .. struct.pack('>I', crc32(id .. data))
+tochunk = (id, data)-> struct.pack('>Ic4', #data, id) .. data .. struct.pack('>I', crc32(id .. data)) -- crcを無視できると書いてあるのに..(出来るなら依存ライブラリ減るのに！)
 
 read1frame = (frame)->
 	data = SIGNATURE ..
 		tochunk('IHDR', struct.pack('>IIBBBBB', frame.width, frame.height, frame.ihdr.depth, frame.ihdr.colortype, frame.ihdr.compresstype, frame.ihdr.filter, frame.ihdr.interlace)) ..
 		(frame.pltechunk or '') .. (frame.trnschunk or '') ..
-		-- tochunk('IDAT', frame.data) ..
-		table.concat([tochunk('IDAT', data) for data in *frame.idats]) .. -- 複数の分割IDATに対応
+		table.concat([tochunk('IDAT', data) for data in *frame.idats]) .. -- 複数の分割IDAT/fdATに対応
 		frame.iendchunk
-	gr.newImage(love.filesystem.newFileData(data, '1.png'))
+	gr.newImage(love.data.newByteData(data)) -- (love.filesystem.newFileData(data, '1.png'))
 
 
 export class APNG
@@ -74,7 +73,12 @@ export class APNG
 				gr.setScissor(frame.left, frame.top, frame.width, frame.height)
 				gr.clear(@clearcolor)
 				gr.setScissor()
-			when 2 then nil -- [ ] todo not impl
+			when 2
+				old = with c = gr.newCanvas @canvas\getDimensions()
+					gr.setCanvas(c)
+					gr.draw(gr.setColor(1,1,1) or @canvas)
+					gr.setCanvas(@canvas)
+				-> @canvas = old
 		switch frame.blend
 			when 0
 				gr.setScissor(frame.left, frame.top, frame.width, frame.height)
@@ -96,3 +100,29 @@ export class APNG
 					return
 				1
 			@update1frame(@frames[@index])
+			
+
+-- macro gif2apng = (fn)->
+-- 	import 'md5'
+-- 	outfn = "embed/#{md5.sumhexa(fn)}.apng"
+-- 	if f := io.open(outfn, 'r') then io.close(f) -- exist?
+-- 	else os.execute("ffmpeg -i #{fn} -plays 0 #{outfn}")
+-- 	"\'#{outfn}\'"
+--
+-- -- macro webp2apng = (fn)->
+-- -- 	import 'md5'
+-- -- 	outfn = "embed/#{md5.sumhexa(fn)}.apng"
+-- -- 	if f := io.open(outfn, 'r') then io.close(f) -- exist?
+-- -- 	else os.execute("magick convert #{fn} -loop 0 #{outfn}") -- imagemagickで１回でやると動画崩れる
+-- -- 	"\'#{outfn}\'"
+-- macro webp2apng = (fn)->
+-- 	import 'md5'
+-- 	midfn = "embed/#{md5.sumhexa(fn)}.gif"
+-- 	if f := io.open(midfn, 'r') then io.close(f) -- exist?
+-- 	else os.execute("magick convert #{fn} -loop 0 #{midfn}")
+--
+-- 	outfn = "embed/#{md5.sumhexa(midfn)}.apng"
+-- 	if f := io.open(outfn, 'r') then io.close(f) -- exist?
+-- 	else os.execute("ffmpeg -i #{midfn} -plays 0 #{outfn}")
+-- 	"\'#{outfn}\'"
+--

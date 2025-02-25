@@ -22,24 +22,27 @@ readChunks = (filecontent)->
 				l1,l2, t1,t2, w1,w2, h1,h2, d1,d2, flags = struct.unpack('<HBHBHBHBHBB', read(16))
 				-- pp {id: id, left: (l1+l2*65536)*2, top: (t1+t2*65536)*2, width: w1+w2*65536+1, height: h1+h2*65536+1, duration: (d1+d2*65536)/1000, flags: falgs, blend: flags/2%2, dispose: flags%2}
 				{id: id, left: (l1+l2*65536)*2, top: (t1+t2*65536)*2, width: 1+w1+w2*65536, height: 1+h1+h2*65536, duration: (d1+d2*65536)/1000, blend: math.floor(flags/2)%2, dispose: flags%2, chunks: readChunks(read(size-16))}
-			else -- VP8  VP8L 
+			else -- VP8␣  VP8L 
 				{id: id, data: read(size)}
 	return while #filecontent >= 8 do read_chunk() -- for/whileでcollectするには受け手/returnの明示が必要
 	
 readAWebp = (filecontent)->
-	-- sig1, size, sig2 = struct.unpack('c4Ic4', read(12))
+	sig1, size, sig2 = struct.unpack('<c4Ic4', filecontent)
+	assert sig1 == 'RIFF'
+	assert sig2 == 'WEBP'
+	assert size+8 == #filecontent
 	readChunks(filecontent\sub(13, -1))
 
 -- tochunk = (id, data)-> struct.pack('>Ic4', #data, id) .. data .. struct.pack('>I', crc32(id .. data))
 
 read1frame = (frame)->
 	chunk = frame.chunks[1]
-	assert chunk.id == 'VP8L'
+	assert chunk.id == 'VP8L' or chunk.id == 'VP8 '
 	data = 'RIFF' .. struct.pack('<I', 4 + 18 + 8 + #chunk.data) .. 'WEBP' .. -- offset 8からのサイズ
-		'VP8X' .. struct.pack('<IIHBHB', 10, frame.vp8x.flags-2, (frame.width-1)%65536, math.floor((frame.width-1)/65536), (frame.height-1)%65536, math.floor((frame.height-1)/65536)) .. -- animation flag を除去
+		'VP8X' .. struct.pack('<IIHBHB', 10, frame.vp8x.flags-2, math.floor((frame.width-1)%65536), math.floor((frame.width-1)/65536), math.floor((frame.height-1)%65536), math.floor((frame.height-1)/65536)) .. -- animation flag を除去
 		chunk.id ..  struct.pack('<I', #chunk.data)  .. chunk.data
 	love.filesystem.write('1.webp', data)
-	gr.newImage(love.filesystem.newFileData(data, '1.webp'))
+	gr.newImage(love.data.newByteData(data))
 
 
 export class AWebp
@@ -47,6 +50,7 @@ export class AWebp
 		chunks = readAWebp(filecontent)
 		@loops, @bgcolor, @frames, vp8x = 1, {0,0,0,1}, {}, nil
 		for chunk in *chunks
+			-- pp chunk.id
 			switch chunk.id
 				when 'VP8X' then vp8x = chunk
 				when 'ANIM' then @bgcolor, @loops = chunk.bgcolor, chunk.loops > 0 and chunk.loops or math.huge

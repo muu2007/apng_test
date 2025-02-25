@@ -91,7 +91,7 @@ end
 local read1frame
 read1frame = function(frame)
 	local data = SIGNATURE .. tochunk('IHDR', struct.pack('>IIBBBBB', frame.width, frame.height, frame.ihdr.depth, frame.ihdr.colortype, frame.ihdr.compresstype, frame.ihdr.filter, frame.ihdr.interlace)) .. (frame.pltechunk or '') .. (frame.trnschunk or '') .. table.concat(_anon_func_0(frame, tochunk)) .. frame.iendchunk
-	return gr.newImage(love.filesystem.newFileData(data, '1.png'))
+	return gr.newImage(love.data.newByteData(data))
 end
 local APNG
 local _class_0
@@ -116,7 +116,17 @@ local _base_0 = {
 					return gr.setScissor()
 				end
 			elseif 2 == _exp_0 then
-				self._dispose = nil
+				local old
+				do
+					local c = gr.newCanvas(self.canvas:getDimensions())
+					gr.setCanvas(c)
+					gr.draw(gr.setColor(1, 1, 1) or self.canvas)
+					gr.setCanvas(self.canvas)
+					old = c
+				end
+				self._dispose = function()
+					self.canvas = old
+				end
 			end
 		end
 		do

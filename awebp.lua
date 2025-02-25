@@ -84,15 +84,19 @@ readChunks = function(filecontent)
 end
 local readAWebp
 readAWebp = function(filecontent)
+	local sig1, size, sig2 = struct.unpack('<c4Ic4', filecontent)
+	assert(sig1 == 'RIFF')
+	assert(sig2 == 'WEBP')
+	assert(size + 8 == #filecontent)
 	return readChunks(filecontent:sub(13, -1))
 end
 local read1frame
 read1frame = function(frame)
 	local chunk = frame.chunks[1]
-	assert(chunk.id == 'VP8L')
-	local data = 'RIFF' .. struct.pack('<I', 4 + 18 + 8 + #chunk.data) .. 'WEBP' .. 'VP8X' .. struct.pack('<IIHBHB', 10, frame.vp8x.flags - 2, (frame.width - 1) % 65536, math.floor((frame.width - 1) / 65536), (frame.height - 1) % 65536, math.floor((frame.height - 1) / 65536)) .. chunk.id .. struct.pack('<I', #chunk.data) .. chunk.data
+	assert(chunk.id == 'VP8L' or chunk.id == 'VP8 ')
+	local data = 'RIFF' .. struct.pack('<I', 4 + 18 + 8 + #chunk.data) .. 'WEBP' .. 'VP8X' .. struct.pack('<IIHBHB', 10, frame.vp8x.flags - 2, math.floor((frame.width - 1) % 65536), math.floor((frame.width - 1) / 65536), math.floor((frame.height - 1) % 65536), math.floor((frame.height - 1) / 65536)) .. chunk.id .. struct.pack('<I', #chunk.data) .. chunk.data
 	love.filesystem.write('1.webp', data)
-	return gr.newImage(love.filesystem.newFileData(data, '1.webp'))
+	return gr.newImage(love.data.newByteData(data))
 end
 local AWebp
 local _class_0
